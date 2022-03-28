@@ -1,6 +1,6 @@
 import tkinter as tk
 import ds_pipeline
-import source_pool
+import ds_source_pool
 import piptest
 
 class GUI_window():
@@ -56,7 +56,7 @@ class GUI_window():
     def play_b_callback(self):
         self.OutputText.insert(tk.INSERT, "pipeline start \n")
         self.StopB['state'] = 'normal'
-        self.mypipeline.start()
+        self.pipeline_thread.start()
 
    #  def record_b_callback(self):
 
@@ -98,11 +98,11 @@ class GUI_window():
         self.root.destroy()
 
     def ready_b_callback(self):
-        self.mypipeline = piptest.Mypipeline(4)
+        self.pipeline_thread = ds_pipeline.Pipeline_T(4, pgie_name='yolov5')
 
         self.OutputText.insert(tk.INSERT, "pipeline set to ready \n")
 
-        self.ds_pool = source_pool.Source_Pool(self.mypipeline.pipeline, 4, 1)
+        self.ds_pool = ds_source_pool.Source_Pool(self.pipeline_thread.get_pipeline(), 4, 1)
         self.ds_pool.start()
         self.ReadyB['state'] = 'disabled'
 

@@ -31,8 +31,10 @@ class Pipeline(object):
         self._create_pipeline()
         self.max_source_number = max_source_num
         if sink_type == "OSD":
+            print("type:osd")
             self.sink_type = "nveglglessink"
         if sink_type == "FAKE":
+            print("type:fake")
             self.sink_type = "fakevideosink"
 
         self._create_streammux()
@@ -415,3 +417,24 @@ class Pipeline(object):
             return "no match"
 
     
+class Pipeline_T(threading.Thread):
+    def __init__(self, source_number, pgie_name, sgie_name=None, sinkt="OSD"):
+        threading.Thread.__init__(self)
+        self.daemon = True
+        self.pipeline = Pipeline(max_source_num=source_number, sink_type=sinkt) 
+        self.pipeline.add_pgie(pgie_name)
+        if sgie_name is not None:
+            for i in range(len(sgie_name)):
+                self.pipeline.add_sgie(sgie_name[i])
+
+        # self.pipeline.add_sgie("retinaface")
+        # self.pipeline.add_sgie("arcface")
+        self.pipeline.add_tracker("deepsort")
+        self.pipeline.set_ready()
+    
+
+    def run(self):
+        self.pipeline.start_pipeline()
+
+    def get_pipeline(self):
+        return self.pipeline

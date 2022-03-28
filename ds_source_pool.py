@@ -1,6 +1,4 @@
 import threading
-# import create_pip
-
 
 class Source_Property():
     def __init__(self, uri, user_id, name, index, framerate=30):
@@ -34,8 +32,6 @@ class Source_Property():
 
     def get_all_member(self):
         return self._user_id, self._name, self._uri, self._source_index, self._source_state
-
-    
 
 
 class Source_Pool(threading.Thread):
