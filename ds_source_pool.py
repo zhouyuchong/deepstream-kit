@@ -47,7 +47,7 @@ class Source_Pool(threading.Thread):
     def _create_pool(self):
         self.pool = [None] * self.max_source_number
 
-    def add_source_to_pool(self, uri, user_id, framerate, name):
+    def add_source_to_pool(self, uri, user_id, framerate, name, analytics_enable, inverse_roi_enable, class_id, **kwargs):
         
         if user_id in [x.get_user_id() for x in self.pool if x is not None]:
             print("already exists")
@@ -56,7 +56,7 @@ class Source_Pool(threading.Thread):
         if not self._lock.acquire(timeout=self._timeout):
             print("Fail to acquire lock, maybe busy")
             return False
-        self.pipeline.add_source(uri, framerate)
+        self.pipeline.add_source(uri, framerate, analytics_enable, inverse_roi_enable, class_id, **kwargs)
         self.pool_index = self.pipeline.source_index
         # print(self.pipeline.source_index)
         self.pool[self.pool_index] = Source_Property(uri=uri, user_id=user_id, framerate=framerate, name=name, index=self.pool_index)

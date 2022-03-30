@@ -14,9 +14,8 @@ import random
 import time
 import threading
 
-
-
 import pyds
+import utils.file
 
 MAX_SOURCE_NUMBER = 6
 MAX_SGIE_NUMBER = 3
@@ -145,6 +144,13 @@ class Pipeline(object):
 
 
     def _create_body(self):
+        utils.file.init_analytics_config_file(self.max_source_number)
+        print("Creating nvdsanalytics \n ")
+        self.nvanalytics = Gst.ElementFactory.make("nvdsanalytics", "analytics")
+        if not self.nvanalytics:
+            sys.stderr.write(" Unable to create nvanalytics \n")
+        # self.nvanalytics.set_property("config-file", "config/config_nvdsanalytics.txt")
+        
         print("Creating tiler \n ")
         self.tiler=Gst.ElementFactory.make("nvmultistreamtiler", "nvtiler")
         if not self.tiler:
@@ -172,6 +178,7 @@ class Pipeline(object):
         self.tiler.set_property("width", 1280)
         self.tiler.set_property("height", 720)
 
+        self.pipeline.add(self.nvanalytics)
         self.pipeline.add(self.tiler)
         self.pipeline.add(self.nvvideoconvert)
         self.pipeline.add(self.nvosd)
@@ -184,24 +191,17 @@ class Pipeline(object):
     # after set_ready, everything created in the pipeline before is ready to run
     # except source
     def set_ready(self):
-        print("Creating nvdsanalytics \n ")
-        self.nvanalytics = Gst.ElementFactory.make("nvdsanalytics", "analytics")
-        if not self.nvanalytics:
-            sys.stderr.write(" Unable to create nvanalytics \n")
-        self.nvanalytics.set_property("config-file", "config/config_nvdsanalytics.txt")
-        self.pipeline.add(self.nvanalytics)
-
         self._create_body()
         self.streammux.link(self.pgie)
+        self.queue_pgie.link(self.tracker)
+        self.tracker.link(self.nvanalytics)
         if len([s for s in self.sgie if s is not None]) != 0:
-            self.queue_pgie.link(self.sgie[0])
+            self.nvanalytics.link(self.sgie[0])
             for i in range(self.sgie_index - 1):
                 self.queue_sgie[i].link(self.sgie[i + 1])
-            self.queue_sgie[self.sgie_index-1].link(self.tracker)
+            self.queue_sgie[self.sgie_index-1].link(self.tiler)
         else:
-            self.queue_pgie.link(self.tracker)
-        self.tracker.link(self.nvanalytics)
-        self.nvanalytics.link(self.tiler)
+            self.queue_pgie.link(self.tiler)
         self.tiler.link(self.nvvideoconvert)
         self.nvvideoconvert.link(self.nvosd)
         self.nvosd.link(self.sink)
@@ -209,8 +209,7 @@ class Pipeline(object):
         print("****** Link Done. Waiting for Sources ****** \n")
    
 
-    def add_source(self, uri, framerate):
-        self.nvanalytics.set_property("config-file", "config/config_nvdsanalytics.txt")
+    def add_source(self, uri, framerate, analytics_enable, inverse_roi_enable, class_id, **kwargs):
         # source_number是一个递增的数，代表总共有多少个source添加过
         # source_index会尝试先等于source_number
         # self.source_index = self.source_number
@@ -249,7 +248,10 @@ class Pipeline(object):
 
         #Enable the source
         self.source_enabled[self.source_index] = True
+        utils.file.modify_analytics_config_file(max_source_number=self.max_source_number, index=self.source_index, enable=analytics_enable, inverse_roi=inverse_roi_enable, class_id=class_id, **kwargs)
         self.source_number += 1
+        self.nvanalytics.set_property("config-file", "config/config_nvdsanalytics.txt")
+
 
         #Set state of source bin to playing
         state_return = self.source_bin_list[self.source_index].set_state(Gst.State.PLAYING)
