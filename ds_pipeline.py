@@ -260,6 +260,14 @@ class Pipeline(object):
         At least one source should be added before the pipeline starts.
         + Args:
             uri(string):uri
+            framerate(int):framerate
+            analytics_enable(boolean):analytics_enable
+            inverse_roi_enable(boolean):inverse_roi_enable
+            class_id(string):class_id
+            **kwargs(dict):
+                format:{ROI-name:1;1;1;1;1;1}
+                ROI-name(string):name of ROI
+                anchors:at least 3 pairs of int, shoul be valid number.
             
         '''
         self.space_to_add = True
