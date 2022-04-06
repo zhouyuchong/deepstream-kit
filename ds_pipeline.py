@@ -22,11 +22,20 @@ MAX_SGIE_NUMBER = 3
 mem_type = int(pyds.NVBUF_MEM_CUDA_UNIFIED)
 
 class Pipeline(object):
-    ## parameters:
-    ## 1. 最大播放源数量
-    ## 2. 输出模式
-    ## 3. 是否实时
+    ''' 
+    This class contains basic operation of gst-pipeline including init/create, start/end, add/delete resource, 
+    Details:
+    '''
     def __init__(self, max_source_num, sink_type):
+        '''
+        + Args:
+            1. 最大播放源数量
+            2. 输出模式: OSD-屏幕显示(可能一段时间后会宕掉), FAKE-后台, FILE-保存文件(待实现), RTSP(待实现)
+        + Members:
+            sgie: a list of sgie nvinfer.
+            sgie_index: index of sgie list.
+            source_bin_list: a list of source bins.
+        '''
         self._create_pipeline()
         self.max_source_number = max_source_num
         if sink_type == "OSD":
@@ -47,11 +56,13 @@ class Pipeline(object):
         self.source_index = 0
         self.source_number = 0
 
+        self.videorate = [None] * max_source_num
+
+    
     def _create_pipeline(self):
         GObject.threads_init()
         Gst.init(None)
 
-        # Create gstreamer elements */
         # Create Pipeline element that will form a connection of other elements
         print("****** Creating Pipeline ******\n ")
         self.pipeline = Gst.Pipeline()
@@ -60,7 +71,14 @@ class Pipeline(object):
             sys.stderr.write(" Unable to create Pipeline \n")
 
 
-    def add_pgie(self, pgie_name):    
+    def add_pgie(self, pgie_name):
+        '''
+        This funciton create a nvinfer element and a queue. Then set a inference config file of this infer.
+        THis function is necessary for creating a gst-pipeline.
+
+        + Args:
+            pgie_name: name of pgie, should be supported gie, now available: yolov5/retinaface
+        '''    
         print("****** Creating PGIEs ******\n ")
         self.pgie = Gst.ElementFactory.make("nvinfer", "primary-inference")
         self.pipeline.add(self.pgie)
@@ -76,6 +94,14 @@ class Pipeline(object):
 
        
     def add_sgie(self, sgie_name):
+        '''
+        This function create a nvinfer element and a queue. Then set a inference config file of this infer.
+        THis function is optional for a gst-pipeline.
+        + NOTICE that pgie and sgie CAN NOT be the same inference.
+
+        + Args:
+            sgie_name: name of sgie, should be supported gie, now available: yolov5s/retinaface/arcface.
+        '''
         self.sgie[self.sgie_index] = Gst.ElementFactory.make("nvinfer", "secondary-nvinference-engine-{}".format(sgie_name))
         self.pipeline.add(self.sgie[self.sgie_index])
         SGIE_CONFIG_FILE = "config/config_{}.txt".format(sgie_name)
@@ -91,6 +117,14 @@ class Pipeline(object):
 
   
     def add_tracker(self, tracker_type):
+        '''
+        This function create a nvtracker elements. Then set a tracker config file.
+        + Args:
+            tracker_type: type of the tracker, should be supported type, now available: 
+                IOU:
+                NvDCF(Nv-discriminative correlation filter):
+                Deepsort:
+        '''
         print("****** Creating nvtracker ******\n ")
         self.tracker = Gst.ElementFactory.make("nvtracker", "tracker")
         if not self.tracker:
@@ -126,6 +160,9 @@ class Pipeline(object):
 
 
     def _create_streammux(self):
+        '''
+        This function creates a nvstreammux element. The properties are set by using macro parameter.
+        '''
         print("Creating streamux \n ")
         # Create nvstreammux instance to form batches from one or more sources.
         self.streammux = Gst.ElementFactory.make("nvstreammux", "Stream-muxer")
@@ -134,22 +171,24 @@ class Pipeline(object):
         self.pipeline.add(self.streammux)
     
         self.streammux.set_property("nvbuf-memory-type", mem_type)
+        # Boolean property to sychronization of input frames using PTS
         self.streammux.set_property('sync-inputs', 1)
         self.streammux.set_property('width', 1280)
         self.streammux.set_property('height', 720)
         self.streammux.set_property('batch-size', self.max_source_number)
-        # 40000 performance better, don't know why
         self.streammux.set_property('batched-push-timeout', 4000)
         self.streammux.set_property('live-source', 1)
 
 
     def _create_body(self):
+        '''
+        This function creates nvdsanalytics, nvmultistreamtiler, nvvideoconvert, nvdsosd and sink elements.
+        '''
         utils.file.init_analytics_config_file(self.max_source_number)
         print("Creating nvdsanalytics \n ")
         self.nvanalytics = Gst.ElementFactory.make("nvdsanalytics", "analytics")
         if not self.nvanalytics:
             sys.stderr.write(" Unable to create nvanalytics \n")
-        # self.nvanalytics.set_property("config-file", "config/config_nvdsanalytics.txt")
         
         print("Creating tiler \n ")
         self.tiler=Gst.ElementFactory.make("nvmultistreamtiler", "nvtiler")
@@ -186,15 +225,21 @@ class Pipeline(object):
         
 
     def get_all_attribute(self):
+        '''
+        Print all members.
+        '''
         return self.__dict__
 
-    # after set_ready, everything created in the pipeline before is ready to run
-    # except source
+
     def set_ready(self):
+        '''
+        Link all elements in the pipeline and wait for the source.
+        '''
         self._create_body()
         self.streammux.link(self.pgie)
         self.queue_pgie.link(self.tracker)
         self.tracker.link(self.nvanalytics)
+        # if there are sgie, link them.
         if len([s for s in self.sgie if s is not None]) != 0:
             self.nvanalytics.link(self.sgie[0])
             for i in range(self.sgie_index - 1):
@@ -210,18 +255,19 @@ class Pipeline(object):
    
 
     def add_source(self, uri, framerate, analytics_enable, inverse_roi_enable, class_id, **kwargs):
-        # source_number是一个递增的数，代表总共有多少个source添加过
-        # source_index会尝试先等于source_number
-        # self.source_index = self.source_number
+        '''
+        This function adds a single source to the pipeline.
+        At least one source should be added before the pipeline starts.
+        + Args:
+            uri(string):uri
+            
+        '''
         self.space_to_add = True
         
         # If the last source_index is used
         # Check if there is a blank spot
         # select an un-enabled source to add
-        #if self.source_index >= self.max_source_number:
-         #   self.space_to_add = False
-         #   self.source_index = 0
-        # print("before:", self.source_index)
+  
         for index in range(self.max_source_number):
             if self.source_enabled[index] == False:
                 # print(index)
@@ -236,7 +282,7 @@ class Pipeline(object):
         print("Calling Start %d " % self.source_index)
 
         #Create a uridecode bin with the chosen source id
-        source_bin = self._create_uridecode_bin(self.source_index, uri)
+        source_bin = self._create_uridecode_bin(self.source_index, uri, framerate)
 
         if (not source_bin):
             sys.stderr.write("Failed to create source bin. Exiting.")
@@ -320,15 +366,25 @@ class Pipeline(object):
             print("STATE CHANGE ASYNC\n")
             self.pipeline.remove(self.source_bin_list[index])
 
-    def _create_uridecode_bin(self, index,filename):
-        print("Creating uridecodebin for [%s]" % filename) 
+    def _create_uridecode_bin(self, index, filename, rate):
+        self.source_index_list[index] = index
+
+        # Create corresponding videorate element for each source.
+        print("Creating videorate for [%s]" % filename) 
+
+        self.videorate[index] = Gst.ElementFactory.make("videorate", "videorate%u"%index)
+        if not self.videorate[index]:
+            sys.stderr.write(" Unable to create videorate \n")
+        self.videorate[index].set_property("max-rate", rate)
+        self.videorate[index].set_property("drop-only", 1)
+        self.pipeline.add(self.videorate[index])
 
         # Create a source GstBin to abstract this bin's content from the rest of the
         # pipeline
-        self.source_index_list[index] = index
+        print("Creating uridecodebin for [%s]" % filename) 
+
         bin_name="source-bin-%02d" % index
         print(bin_name)
-
         # Source element for reading from the uri.
         # We will use decodebin and let it figure out the container format of the
         # stream and the codec and plug the appropriate demux and decode plugins.
@@ -359,14 +415,22 @@ class Pipeline(object):
         print("gstname=",gstname)
         if(gstname.find("video")!=-1):
             source_id = data
+            # Get the sink pad from videorate and src pad from decodebin
+            sinkpad = self.videorate[source_id].get_static_pad("sink")
+            if  pad.link(sinkpad) == Gst.PadLinkReturn.OK:
+                print("Decodebin linked to videorate")
+            else:
+                sys.stderr.write("Failed to link decodebin to videorate\n")
+            
+            # Get a sink pad from the streammux and src pad from videorate
             pad_name = "sink_%u" % source_id
             print("pad name:", pad_name)
-            #Get a sink pad from the streammux, link to decodebin
+            srcpad = self.videorate[source_id].get_static_pad("src")
             sinkpad = self.streammux.get_request_pad(pad_name)
-            if pad.link(sinkpad) == Gst.PadLinkReturn.OK:
-                print("Decodebin linked to pipeline")
+            if  srcpad.link(sinkpad) == Gst.PadLinkReturn.OK:
+                print("videorate linked to streammux")
             else:
-                sys.stderr.write("Failed to link decodebin to pipeline\n")
+                sys.stderr.write("Failed to link videorate to streammux\n")
 
     def _decodebin_child_added(self, child_proxy,Object,name,user_data):
         print("Decodebin child added:", name, "\n")
