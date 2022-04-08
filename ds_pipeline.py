@@ -1,4 +1,6 @@
 import sys
+
+from numpy import uint
 sys.path.append('../')
 import gi
 import configparser
@@ -286,6 +288,19 @@ class Pipeline(object):
         if self.space_to_add == False:
             print("reach the max source number!")
             return False
+        
+        if self.videorate[self.source_index] is None:
+            # Create corresponding videorate element for each source.
+            print("Creating videorate for [%s]" % uri) 
+
+            self.videorate[self.source_index] = Gst.ElementFactory.make("videorate", "videorate%u"%self.source_index)
+            if not self.videorate[self.source_index]:
+                sys.stderr.write(" Unable to create videorate \n")
+            self.pipeline.add(self.videorate[self.source_index])
+            
+        self.videorate[self.source_index].set_property("max-rate", framerate)
+        self.videorate[self.source_index].set_property("drop-only", 1)
+        
 
         print("Calling Start %d " % self.source_index)
 
@@ -377,15 +392,7 @@ class Pipeline(object):
     def _create_uridecode_bin(self, index, filename, rate):
         self.source_index_list[index] = index
 
-        # Create corresponding videorate element for each source.
-        print("Creating videorate for [%s]" % filename) 
-
-        self.videorate[index] = Gst.ElementFactory.make("videorate", "videorate%u"%index)
-        if not self.videorate[index]:
-            sys.stderr.write(" Unable to create videorate \n")
-        self.videorate[index].set_property("max-rate", rate)
-        self.videorate[index].set_property("drop-only", 1)
-        self.pipeline.add(self.videorate[index])
+        
 
         # Create a source GstBin to abstract this bin's content from the rest of the
         # pipeline
