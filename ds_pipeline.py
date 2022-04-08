@@ -246,7 +246,7 @@ class Pipeline(object):
                 self.queue_sgie[i].link(self.sgie[i + 1])
             self.queue_sgie[self.sgie_index-1].link(self.tiler)
         else:
-            self.queue_pgie.link(self.tiler)
+            self.nvanalytics.link(self.tiler)
         self.tiler.link(self.nvvideoconvert)
         self.nvvideoconvert.link(self.nvosd)
         self.nvosd.link(self.sink)
