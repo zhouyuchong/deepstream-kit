@@ -1,3 +1,4 @@
+import ctypes
 import sys
 
 from numpy import uint
@@ -9,14 +10,19 @@ from gi.repository import GObject, Gst
 from gi.repository import GLib
 import sys
 import math
-from common.is_aarch_64 import is_aarch64
-from common.bus_call import bus_call
 import random
 import time
 import threading
+import ctypes
+
+from common.is_aarch_64 import is_aarch64
+from common.bus_call import bus_call
 
 # import pyds
 import utils.file
+ctypes.cdll.LoadLibrary('/opt/nvidia/deepstream/deepstream/sources/pythonapps/models/yolov5/yolov5s/libYoloV5Decoder.so')
+ctypes.cdll.LoadLibrary('/opt/nvidia/deepstream/deepstream/sources/pythonapps/models/retinaface/libRetinafaceDecoder.so')
+ctypes.cdll.LoadLibrary('/opt/nvidia/deepstream/deepstream/sources/pythonapps/models/arcface/libArcFaceDecoder.so')
 
 MAX_SOURCE_NUMBER = 6
 MAX_SGIE_NUMBER = 3
