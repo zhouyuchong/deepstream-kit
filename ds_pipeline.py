@@ -18,8 +18,11 @@ import ctypes
 from common.is_aarch_64 import is_aarch64
 from common.bus_call import bus_call
 
+
 # import pyds
 import utils.file
+from utils.fps import Timer
+from ds_probe import tiler_sink_pad_buffer_probe
 ctypes.cdll.LoadLibrary('/opt/nvidia/deepstream/deepstream/sources/pythonapps/models/yolov5/yolov5s/libYoloV5Decoder.so')
 ctypes.cdll.LoadLibrary('/opt/nvidia/deepstream/deepstream/sources/pythonapps/models/retinaface/libRetinafaceDecoder.so')
 ctypes.cdll.LoadLibrary('/opt/nvidia/deepstream/deepstream/sources/pythonapps/models/arcface/libArcFaceDecoder.so')
@@ -27,6 +30,7 @@ ctypes.cdll.LoadLibrary('/opt/nvidia/deepstream/deepstream/sources/pythonapps/mo
 MAX_SOURCE_NUMBER = 6
 MAX_SGIE_NUMBER = 3
 # mem_type = int(pyds.NVBUF_MEM_CUDA_UNIFIED)
+
 
 class Pipeline(object):
     ''' 
@@ -216,6 +220,19 @@ class Pipeline(object):
         #  set an empty init config file to nvanalytics 
         self.nvanalytics.set_property("config-file", "config/config_nvdsanalytics.txt")
         
+        # Add nvvidconv1 and filter1 to convert the frames to RGBA
+        # which is easier to work with in Python.
+        print("Creating nvvidconv1 \n ")
+        self.nvvidconv1 = Gst.ElementFactory.make("nvvideoconvert", "convertor1")
+        if not self.nvvidconv1:
+            sys.stderr.write(" Unable to create nvvidconv1 \n")
+        print("Creating filter1 \n ")
+        caps1 = Gst.Caps.from_string("video/x-raw(memory:NVMM), format=RGBA")
+        self.filter1 = Gst.ElementFactory.make("capsfilter", "filter1")
+        if not self.filter1:
+            sys.stderr.write(" Unable to get the caps filter1 \n")
+        self.filter1.set_property("caps", caps1)
+
         print("Creating tiler \n ")
         self.tiler=Gst.ElementFactory.make("nvmultistreamtiler", "nvtiler")
         if not self.tiler:
@@ -244,18 +261,13 @@ class Pipeline(object):
         self.tiler.set_property("height", 720)
 
         self.pipeline.add(self.nvanalytics)
+        self.pipeline.add(self.nvvidconv1)
+        self.pipeline.add(self.filter1)
         self.pipeline.add(self.tiler)
         self.pipeline.add(self.nvvideoconvert)
         self.pipeline.add(self.nvosd)
         self.pipeline.add(self.sink)
         
-    def get_all_attribute(self):
-        '''
-        Print all members.
-        '''
-        return self.__dict__
-
-
     def set_ready(self):
         '''
         Link all elements in the pipeline and wait for the source.
@@ -263,23 +275,26 @@ class Pipeline(object):
         self._create_body()
         self._create_head()
         self.streammux.link(self.pgie)
-        self.queue_pgie.link(self.tracker)
-        self.tracker.link(self.nvanalytics)
+        # self.queue_pgie.link(self.tracker)
+        
         # if there are sgies, link them.
         if len([s for s in self.sgie if s is not None]) != 0:
-            self.nvanalytics.link(self.sgie[0])
+            self.queue_pgie.link(self.sgie[0])
             for i in range(self.sgie_index - 1):
                 self.queue_sgie[i].link(self.sgie[i + 1])
-            self.queue_sgie[self.sgie_index-1].link(self.tiler)
+            self.queue_sgie[self.sgie_index-1].link(self.tracker)
         else:
-            self.nvanalytics.link(self.tiler)
+            self.queue_pgie.link(self.tracker)
+        self.tracker.link(self.nvanalytics)
+        self.nvanalytics.link(self.nvvidconv1)
+        self.nvvidconv1.link(self.filter1)
+        self.filter1.link(self.tiler)
         self.tiler.link(self.nvvideoconvert)
         self.nvvideoconvert.link(self.nvosd)
         self.nvosd.link(self.sink)
 
         print("****** Link Done. Waiting for Sources ****** \n")
    
-
     def add_source(self, uri, framerate, analytics_enable, inverse_roi_enable, class_id, **kwargs):
         '''
         This function adds a single source to the pipeline.
@@ -314,6 +329,7 @@ class Pipeline(object):
             return False
         
         print("Calling Start %d " % self.source_index)
+        
 
         # set the framerate of source
         self.videorate[self.source_index].set_property("max-rate", framerate)
@@ -469,6 +485,7 @@ class Pipeline(object):
             sys.stderr.write("Failed to link videorate to streammux\n")
 
     def start_pipeline(self):
+        Timer(self.max_source_number)
         self.loop = GObject.MainLoop()
         self.bus = self.pipeline.get_bus()
         self.bus.add_signal_watch()
@@ -477,6 +494,11 @@ class Pipeline(object):
         # Lets add probe to get informed of the meta data generated, we add probe to
         # the sink pad of the osd element, since by that time, the buffer would have
         # had got all the metadata.
+        tiler_sink_pad = self.tiler.get_static_pad("sink")
+        if not tiler_sink_pad:
+            sys.stderr.write(" Unable to get sink pad \n")
+        else:
+            tiler_sink_pad.add_probe(Gst.PadProbeType.BUFFER, tiler_sink_pad_buffer_probe, 0)
         """
         osdsinkpad = nvosd.get_static_pad("sink")
         if not osdsinkpad:
@@ -506,10 +528,17 @@ class Pipeline(object):
             String: current state of given source.
         '''
         if self.source_bin_list[index] is not None:
-            print("source_bin_list[{}] state is {}".format(index, self.source_bin_list[index].get_state(Gst.CLOCK_TIME_NONE)))
-            return str(self.source_bin_list[index].get_state(Gst.CLOCK_TIME_NONE)[1])
+            print("source_bin_list[{}] state : {}".format(index, self.source_bin_list[index].get_state(Gst.CLOCK_TIME_NONE)))
+            return self.source_bin_list[index].get_state(Gst.CLOCK_TIME_NONE)[1]
         else:
             return "no match"
+
+    def get_all_attribute(self):
+        '''
+        Print all members.
+        '''
+        return self.__dict__
+
 
     
 class Pipeline_T(threading.Thread):
@@ -522,8 +551,6 @@ class Pipeline_T(threading.Thread):
             for i in range(len(sgie_name)):
                 self.pipeline.add_sgie(sgie_name[i])
 
-        # self.pipeline.add_sgie("retinaface")
-        # self.pipeline.add_sgie("arcface")
         self.pipeline.add_tracker("deepsort")
         self.pipeline.set_ready()
     
