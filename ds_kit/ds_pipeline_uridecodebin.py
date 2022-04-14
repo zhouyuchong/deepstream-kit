@@ -1,4 +1,3 @@
-import ctypes
 import sys
 
 from numpy import uint
@@ -10,27 +9,19 @@ from gi.repository import GObject, Gst
 from gi.repository import GLib
 import sys
 import math
+from common.is_aarch_64 import is_aarch64
+from common.bus_call import bus_call
+import collections
 import random
 import time
 import threading
-import ctypes
 
-from common.is_aarch_64 import is_aarch64
-from common.bus_call import bus_call
-
-
-# import pyds
+import pyds
 import utils.file
-from utils.fps import Timer
-from ds_probe import tiler_sink_pad_buffer_probe
-ctypes.cdll.LoadLibrary('/opt/nvidia/deepstream/deepstream/sources/pythonapps/models/yolov5/yolov5s/libYoloV5Decoder.so')
-ctypes.cdll.LoadLibrary('/opt/nvidia/deepstream/deepstream/sources/pythonapps/models/retinaface/libRetinafaceDecoder.so')
-ctypes.cdll.LoadLibrary('/opt/nvidia/deepstream/deepstream/sources/pythonapps/models/arcface/libArcFaceDecoder.so')
 
 MAX_SOURCE_NUMBER = 6
 MAX_SGIE_NUMBER = 3
 # mem_type = int(pyds.NVBUF_MEM_CUDA_UNIFIED)
-
 
 class Pipeline(object):
     ''' 
@@ -40,8 +31,8 @@ class Pipeline(object):
     def __init__(self, max_source_num, sink_type):
         '''
         + Args:
-            1. max_source_num:最大播放源数量
-            2. sink_type:输出模式: OSD-屏幕显示(可能一段时间后会宕掉), FAKE-后台, FILE-保存文件(待实现), RTSP(待实现)
+            1. 最大播放源数量
+            2. 输出模式: OSD-屏幕显示(可能一段时间后会宕掉), FAKE-后台, FILE-保存文件(待实现), RTSP(待实现)
         + Members:
             sgie: a list of sgie nvinfer.
             sgie_index: index of sgie list.
@@ -61,18 +52,14 @@ class Pipeline(object):
         self.queue_sgie = [None] * MAX_SGIE_NUMBER
         self.sgie_index = 0
                 
-        # list of sources_pool controlers
         self.source_bin_list = [None] * max_source_num
         self.source_index_list = [0] * max_source_num
         self.source_enabled = [False] * max_source_num
         self.source_index = 0
         self.source_number = 0
 
-        # list of pipeline source plugins
         self.videorate = [None] * max_source_num
-        self.depay = [None] * max_source_num
-        self.h264parser = [None] * max_source_num
-        self.decoder = [None] * max_source_num
+
     
     def _create_pipeline(self):
         GObject.threads_init()
@@ -84,6 +71,7 @@ class Pipeline(object):
 
         if not self.pipeline:
             sys.stderr.write(" Unable to create Pipeline \n")
+
 
     def add_pgie(self, pgie_name):
         '''
@@ -105,6 +93,7 @@ class Pipeline(object):
         self.pgie.link(self.queue_pgie)
 
         print("****** PGIE {} IS SET ******\n".format(pgie_name))
+
        
     def add_sgie(self, sgie_name):
         '''
@@ -128,6 +117,7 @@ class Pipeline(object):
 
         print("****** SGIE_{} IS SET ******\n".format(sgie_name))
 
+  
     def add_tracker(self, tracker_type):
         '''
         This function create a nvtracker elements. Then set a tracker config file.
@@ -170,6 +160,7 @@ class Pipeline(object):
         
         self.pipeline.add(self.tracker)
 
+
     def _create_streammux(self):
         '''
         This function creates a nvstreammux element. The properties are set by using macro parameter.
@@ -190,24 +181,7 @@ class Pipeline(object):
         self.streammux.set_property('batched-push-timeout', 4000)
         self.streammux.set_property('live-source', 1)
 
-    def _create_head(self):
-        '''
-        This function creates decode plugins for rtsp sources
-        '''
-        for i in range(self.max_source_number):
-            self.videorate[i] = Gst.ElementFactory.make("videorate", "videorate%u"%i)
-            self.depay[i] = Gst.ElementFactory.make('rtph264depay', "depay%u"%i)
-            self.h264parser[i] = Gst.ElementFactory.make("h264parse", "h264-parser%u"%i)
-            self.decoder[i] = Gst.ElementFactory.make("nvv4l2decoder", "nvv4l2-decoder%u"%i)
-            self.pipeline.add(self.videorate[i])
-            self.pipeline.add(self.depay[i])
-            self.pipeline.add(self.h264parser[i])
-            self.pipeline.add(self.decoder[i])
 
-            self.depay[i].link(self.h264parser[i])
-            self.h264parser[i].link(self.decoder[i])
-            self.decoder[i].link(self.videorate[i])
-        
     def _create_body(self):
         '''
         This function creates nvdsanalytics, nvmultistreamtiler, nvvideoconvert, nvdsosd and sink elements.
@@ -217,22 +191,7 @@ class Pipeline(object):
         self.nvanalytics = Gst.ElementFactory.make("nvdsanalytics", "analytics")
         if not self.nvanalytics:
             sys.stderr.write(" Unable to create nvanalytics \n")
-        #  set an empty init config file to nvanalytics 
-        self.nvanalytics.set_property("config-file", "config/config_nvdsanalytics.txt")
         
-        # Add nvvidconv1 and filter1 to convert the frames to RGBA
-        # which is easier to work with in Python.
-        print("Creating nvvidconv1 \n ")
-        self.nvvidconv1 = Gst.ElementFactory.make("nvvideoconvert", "convertor1")
-        if not self.nvvidconv1:
-            sys.stderr.write(" Unable to create nvvidconv1 \n")
-        print("Creating filter1 \n ")
-        caps1 = Gst.Caps.from_string("video/x-raw(memory:NVMM), format=RGBA")
-        self.filter1 = Gst.ElementFactory.make("capsfilter", "filter1")
-        if not self.filter1:
-            sys.stderr.write(" Unable to get the caps filter1 \n")
-        self.filter1.set_property("caps", caps1)
-
         print("Creating tiler \n ")
         self.tiler=Gst.ElementFactory.make("nvmultistreamtiler", "nvtiler")
         if not self.tiler:
@@ -261,45 +220,46 @@ class Pipeline(object):
         self.tiler.set_property("height", 720)
 
         self.pipeline.add(self.nvanalytics)
-        self.pipeline.add(self.nvvidconv1)
-        self.pipeline.add(self.filter1)
         self.pipeline.add(self.tiler)
         self.pipeline.add(self.nvvideoconvert)
         self.pipeline.add(self.nvosd)
         self.pipeline.add(self.sink)
         
+
+    def get_all_attribute(self):
+        '''
+        Print all members.
+        '''
+        return self.__dict__
+
+
     def set_ready(self):
         '''
         Link all elements in the pipeline and wait for the source.
         '''
         self._create_body()
-        self._create_head()
         self.streammux.link(self.pgie)
-        # self.queue_pgie.link(self.tracker)
-        
-        # if there are sgies, link them.
+        self.queue_pgie.link(self.tracker)
+        self.tracker.link(self.nvanalytics)
+        # if there are sgie, link them.
         if len([s for s in self.sgie if s is not None]) != 0:
-            self.queue_pgie.link(self.sgie[0])
+            self.nvanalytics.link(self.sgie[0])
             for i in range(self.sgie_index - 1):
                 self.queue_sgie[i].link(self.sgie[i + 1])
-            self.queue_sgie[self.sgie_index-1].link(self.tracker)
+            self.queue_sgie[self.sgie_index-1].link(self.tiler)
         else:
-            self.queue_pgie.link(self.tracker)
-        self.tracker.link(self.nvanalytics)
-        self.nvanalytics.link(self.nvvidconv1)
-        self.nvvidconv1.link(self.filter1)
-        self.filter1.link(self.tiler)
+            self.nvanalytics.link(self.tiler)
         self.tiler.link(self.nvvideoconvert)
         self.nvvideoconvert.link(self.nvosd)
         self.nvosd.link(self.sink)
 
         print("****** Link Done. Waiting for Sources ****** \n")
    
+
     def add_source(self, uri, framerate, analytics_enable, inverse_roi_enable, class_id, **kwargs):
         '''
         This function adds a single source to the pipeline.
         At least one source should be added before the pipeline starts.
-        Return True if add successfully.
         + Args:
             uri(string):uri
             framerate(int):framerate
@@ -309,7 +269,7 @@ class Pipeline(object):
             **kwargs(dict):
                 format:{ROI-name:1;1;1;1;1;1}
                 ROI-name(string):name of ROI
-                vertexes:at least 3 pairs of int, shoul be valid number.
+                anchors:at least 3 pairs of int, shoul be valid number.
             
         '''
         self.space_to_add = True
@@ -320,6 +280,7 @@ class Pipeline(object):
   
         for index in range(self.max_source_number):
             if self.source_enabled[index] == False:
+                # print(index)
                 self.source_index = index
                 self.space_to_add = True
                 break
@@ -328,103 +289,74 @@ class Pipeline(object):
             print("reach the max source number!")
             return False
         
-        print("Calling Start %d " % self.source_index)
-        
+        if self.videorate[self.source_index] is None:
+            # Create corresponding videorate element for each source.
+            print("Creating videorate for [%s]" % uri) 
 
-        # set the framerate of source
+            self.videorate[self.source_index] = Gst.ElementFactory.make("videorate", "videorate%u"%self.source_index)
+            if not self.videorate[self.source_index]:
+                sys.stderr.write(" Unable to create videorate \n")
+            self.pipeline.add(self.videorate[self.source_index])
+            
         self.videorate[self.source_index].set_property("max-rate", framerate)
         self.videorate[self.source_index].set_property("drop-only", 1)
+        
 
-        # create rtspsrc plugin for source
-        source_bin = self._create_rtsp_bin(self.source_index, uri)
+        print("Calling Start %d " % self.source_index)
+
+        #Create a uridecode bin with the chosen source id
+        source_bin = self._create_uridecode_bin(self.source_index, uri, framerate)
+
         if (not source_bin):
             sys.stderr.write("Failed to create source bin. Exiting.")
             exit(1)
         
-        # Add source bin to our list and to pipeline
+        #Add source bin to our list and to pipeline
         self.source_bin_list[self.source_index] = source_bin
         self.pipeline.add(self.source_bin_list[self.source_index])
 
-        # Enable the source
+        #Enable the source
         self.source_enabled[self.source_index] = True
-        # set the nvanalytics before change the rtspsrc plugin's state
         utils.file.modify_analytics_config_file(max_source_number=self.max_source_number, index=self.source_index, enable=analytics_enable, inverse_roi=inverse_roi_enable, class_id=class_id, **kwargs)
+        self.source_number += 1
         self.nvanalytics.set_property("config-file", "config/config_nvdsanalytics.txt")
 
 
-        # Set state of source bin to playing
-        # if the pipeline is at PLAYING State, then play the source added immediately.
-        # if not, just add sources and wait for the pipeline to start.
-        if self.pipeline.get_state(Gst.CLOCK_TIME_NONE)[1] == Gst.State.PLAYING:
-            state_return = self.source_bin_list[self.source_index].set_state(Gst.State.PLAYING)
-            if state_return == Gst.StateChangeReturn.SUCCESS:
-                print("STATE CHANGE SUCCESS\n")
+        #Set state of source bin to playing
+        state_return = self.source_bin_list[self.source_index].set_state(Gst.State.PLAYING)
 
-            elif state_return == Gst.StateChangeReturn.FAILURE:
-                print("STATE CHANGE FAILURE\n")
-                return False
-            
-            elif state_return == Gst.StateChangeReturn.ASYNC:
-                state_return = self.source_bin_list[self.source_index].get_state(Gst.CLOCK_TIME_NONE)
+        if state_return == Gst.StateChangeReturn.SUCCESS:
+            print("STATE CHANGE SUCCESS\n")
 
-            elif state_return == Gst.StateChangeReturn.NO_PREROLL:
-                print("STATE CHANGE NO PREROLL\n")
+        elif state_return == Gst.StateChangeReturn.FAILURE:
+            print("STATE CHANGE FAILURE\n")
+            return False
+        
+        elif state_return == Gst.StateChangeReturn.ASYNC:
+            state_return = self.source_bin_list[self.source_index].get_state(Gst.CLOCK_TIME_NONE)
+
+        elif state_return == Gst.StateChangeReturn.NO_PREROLL:
+            print("STATE CHANGE NO PREROLL\n")
         
         return True
 
-    def _drop_send_signal(self, message, data):
-        '''
-        Emitted before each RTSP request is sent, in order to allow the application to modify send parameters or to skip the message entirely.
-        '''
-        print("Delete rtsp source, drop the PAUSE signal to avoid error.")
-        return False
-
-    def _create_rtsp_bin(self, index, uri):
-        self.source_index_list[index] = index
-
-        # Create a source GstBin to abstract this bin's content from the rest of the
-        # pipeline
-        print("Creating rtspsrc for [%s]" % uri) 
-
-        bin_name="source-bin-%02d" % index
-        print(bin_name)
-
-        # Source element for reading from the uri.
-        bin=Gst.ElementFactory.make("rtspsrc", bin_name)
-        if not bin:
-            sys.stderr.write(" Unable to create rtspsrc bin \n")
-        # We set the input uri to the source element
-        bin.set_property("location",uri)
-
-        # Because rtspsrc only has 'sometimes' pad
-        # Thus connect to the "pad-added" signal of the rtspsrc which generates a
-        # callback once a new pad for raw data has been created by the rtspsrc
-        bin.connect("pad-added",self._combine_newpad,self.source_index_list[index])
-
-        return bin
-
     def delete_source(self, index):
-        '''
-        This function deletes a single source by given index. Return True if delete successfully.
-        '''
         if self.source_bin_list[index] is None:
             print("No match for this index, please check.")
             return False
-        if self.source_bin_list[index].get_state(Gst.CLOCK_TIME_NONE)[1] != Gst.State.PLAYING :
+        if str(self.source_bin_list[index].get_state(Gst.CLOCK_TIME_NONE)[1]) != "<enum GST_STATE_PLAYING of type Gst.State>":
             print("State error, current state is {}".format(str(self.source_bin_list[index].get_state(Gst.CLOCK_TIME_NONE)[1])))
             return False
-        
         #Disable the source
         self.source_enabled[index] = False
         #Release the source
         print("Calling Stop %d " % index)
-        self.source_bin_list[index].connect("before-send", self._drop_send_signal)
         self._stop_release_source(index)
 
         #Quit if no sources remaining
         if (len([x for x in self.source_enabled if x is True]) == 0):
             self.loop.quit()
-            print("All sources stopped quitting\n")
+            print("All sources stopped quitting")
             return False
         return True
 
@@ -432,16 +364,16 @@ class Pipeline(object):
         state_return = self.source_bin_list[index].set_state(Gst.State.NULL)
 
         if state_return == Gst.StateChangeReturn.SUCCESS:
-            print("SOURCE BIN STATE CHANGE SUCCESS\n")
+            print("STATE CHANGE SUCCESS\n")
             pad_name = "sink_%u" % index
             print(pad_name)
-            # Retrieve sink pad to be released
+            #Retrieve sink pad to be released
             sinkpad = self.streammux.get_static_pad(pad_name)
-            # Send flush stop event to the sink pad, then release from the streammux
+            #Send flush stop event to the sink pad, then release from the streammux
             sinkpad.send_event(Gst.Event.new_flush_stop(False))
             self.streammux.release_request_pad(sinkpad)
-            print("STREAMMUX STATE CHANGE SUCCESS\n")
-            # Remove the source bin from the pipeline
+            print("STATE CHANGE SUCCESS\n")
+            #Remove the source bin from the pipeline
             self.pipeline.remove(self.source_bin_list[index])
 
         elif state_return == Gst.StateChangeReturn.FAILURE:
@@ -457,35 +389,77 @@ class Pipeline(object):
             print("STATE CHANGE ASYNC\n")
             self.pipeline.remove(self.source_bin_list[index])
 
-    def _combine_newpad(self, rtspsrc, pad, data):
-        print("In combine_newpad\n")
+    def _create_uridecode_bin(self, index, filename, rate):
+        self.source_index_list[index] = index
+
+        
+
+        # Create a source GstBin to abstract this bin's content from the rest of the
+        # pipeline
+        print("Creating uridecodebin for [%s]" % filename) 
+
+        bin_name="source-bin-%02d" % index
+        print(bin_name)
+        # Source element for reading from the uri.
+        # We will use decodebin and let it figure out the container format of the
+        # stream and the codec and plug the appropriate demux and decode plugins.
+        bin=Gst.ElementFactory.make("uridecodebin", bin_name)
+        if not bin:
+            sys.stderr.write(" Unable to create uri decode bin \n")
+        # We set the input uri to the source element
+        bin.set_property("uri",filename)
+        # Connect to the "pad-added" signal of the decodebin which generates a
+        # callback once a new pad for raw data has been created by the decodebin
+        bin.connect("pad-added",self._cb_newpad,self.source_index_list[index])
+
+        bin.connect("child-added",self._decodebin_child_added,self.source_index_list[index])
+
+        # Set status of the source to enabled
+        # g_source_enabled[index] = True
+
+        return bin
+
+    def _cb_newpad(self, decodebin,pad,data):
+        print("In cb_newpad\n")
         caps=pad.get_current_caps()
         gststruct=caps.get_structure(0)
         gstname=gststruct.get_name()
 
+        # Need to check if the pad created by the decodebin is for video and not
+        # audio.
         print("gstname=",gstname)
-        source_id = data
-        # Get the sink pad from rtph264depay and src pad from rtspsrc
-        sinkpad = self.depay[source_id].get_static_pad("sink")
-        if not sinkpad:
-            print("fail to get depay sink pad\n")
-        if pad.link(sinkpad) == Gst.PadLinkReturn.OK:
-            print("Rtspsrc linked to depay\n")
-        else:
-            sys.stderr.write("Failed to link decodebin to videorate\n")
-        
-        # Retrive a sink pad from the streammux and src pad from videorate
-        pad_name = "sink_%u" % source_id
-        print("pad name:", pad_name)
-        srcpad = self.videorate[source_id].get_static_pad("src")
-        sinkpad = self.streammux.get_request_pad(pad_name)
-        if srcpad.link(sinkpad) == Gst.PadLinkReturn.OK:
-            print("videorate linked to streammux")
-        else:
-            sys.stderr.write("Failed to link videorate to streammux\n")
+        if(gstname.find("video")!=-1):
+            source_id = data
+            # Get the sink pad from videorate and src pad from decodebin
+            sinkpad = self.videorate[source_id].get_static_pad("sink")
+            if  pad.link(sinkpad) == Gst.PadLinkReturn.OK:
+                print("Decodebin linked to videorate")
+            else:
+                sys.stderr.write("Failed to link decodebin to videorate\n")
+            
+            # Get a sink pad from the streammux and src pad from videorate
+            pad_name = "sink_%u" % source_id
+            print("pad name:", pad_name)
+            srcpad = self.videorate[source_id].get_static_pad("src")
+            sinkpad = self.streammux.get_request_pad(pad_name)
+            if  srcpad.link(sinkpad) == Gst.PadLinkReturn.OK:
+                print("videorate linked to streammux")
+            else:
+                sys.stderr.write("Failed to link videorate to streammux\n")
+
+    def _decodebin_child_added(self, child_proxy,Object,name,user_data):
+        print("Decodebin child added:", name, "\n")
+        if(name.find("decodebin") != -1):
+            Object.connect("child-added",self._decodebin_child_added,user_data)   
+        if(name.find("nvv4l2decoder") != -1):
+            if (is_aarch64()):
+                Object.set_property("enable-max-performance", True)
+                Object.set_property("drop-frame-interval", 0)
+                Object.set_property("num-extra-surfaces", 0)
+            else:
+                Object.set_property("gpu_id", 0)
 
     def start_pipeline(self):
-        Timer(self.max_source_number)
         self.loop = GObject.MainLoop()
         self.bus = self.pipeline.get_bus()
         self.bus.add_signal_watch()
@@ -494,18 +468,13 @@ class Pipeline(object):
         # Lets add probe to get informed of the meta data generated, we add probe to
         # the sink pad of the osd element, since by that time, the buffer would have
         # had got all the metadata.
-        tiler_sink_pad = self.tiler.get_static_pad("sink")
-        if not tiler_sink_pad:
-            sys.stderr.write(" Unable to get sink pad \n")
-        else:
-            tiler_sink_pad.add_probe(Gst.PadProbeType.BUFFER, tiler_sink_pad_buffer_probe, 0)
-        """
-        osdsinkpad = nvosd.get_static_pad("sink")
+        """osdsinkpad = nvosd.get_static_pad("sink")
         if not osdsinkpad:
             sys.stderr.write(" Unable to get sink pad of nvosd \n")
 
-        osdsinkpad.add_probe(Gst.PadProbeType.BUFFER, osd_sink_pad_buffer_probe, 0)
-        """
+        osdsinkpad.add_probe(Gst.PadProbeType.BUFFER, osd_sink_pad_buffer_probe, 0)"""
+
+        
         # start play back and listen to events
         print("Starting pipeline \n")
         
@@ -521,24 +490,12 @@ class Pipeline(object):
         self.pipeline.set_state(Gst.State.NULL)
 
     def get_source_bin_state(self, index):
-        '''
-        This function to get state of a source by given index.
-        + Return:
-            False: if no match.
-            String: current state of given source.
-        '''
         if self.source_bin_list[index] is not None:
-            print("source_bin_list[{}] state : {}".format(index, self.source_bin_list[index].get_state(Gst.CLOCK_TIME_NONE)))
-            return self.source_bin_list[index].get_state(Gst.CLOCK_TIME_NONE)[1]
+        # print("source_bin_list[{}] state is {}".format(index, self.source_bin_list[index].get_state(Gst.CLOCK_TIME_NONE)))
+            print(type(self.source_bin_list[index].get_state(Gst.CLOCK_TIME_NONE)[1]))
+            return str(self.source_bin_list[index].get_state(Gst.CLOCK_TIME_NONE)[1])
         else:
             return "no match"
-
-    def get_all_attribute(self):
-        '''
-        Print all members.
-        '''
-        return self.__dict__
-
 
     
 class Pipeline_T(threading.Thread):
@@ -551,9 +508,12 @@ class Pipeline_T(threading.Thread):
             for i in range(len(sgie_name)):
                 self.pipeline.add_sgie(sgie_name[i])
 
+        # self.pipeline.add_sgie("retinaface")
+        # self.pipeline.add_sgie("arcface")
         self.pipeline.add_tracker("deepsort")
         self.pipeline.set_ready()
     
+
     def run(self):
         self.pipeline.start_pipeline()
 

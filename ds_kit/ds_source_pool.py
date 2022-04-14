@@ -31,7 +31,7 @@ class Source_Property():
         return self._source_index
 
     def get_all_member(self):
-        return self._user_id, self._name, self._uri, self._source_index, self._source_state
+        return self._source_index, self._user_id, self._name, self._uri, self._source_state
 
 
 class Source_Pool(threading.Thread):
@@ -48,7 +48,23 @@ class Source_Pool(threading.Thread):
         self.pool = [None] * self.max_source_number
 
     def add_source_to_pool(self, uri, user_id, framerate, name, analytics_enable, inverse_roi_enable, class_id, **kwargs):
-        
+        '''
+        This function adds a single source to the source_pool.
+        At least one source should be added before the pipeline starts.
+        + Args:
+            uri(string):uri
+            userid:uid
+            framerate(int):framerate
+            name:source name
+            analytics_enable(boolean):analytics_enable
+            inverse_roi_enable(boolean):inverse_roi_enable
+            class_id(string):class_id
+            **kwargs(dict):
+                format:{ROI-name:1;1;1;1;1;1}
+                ROI-name(string):name of ROI
+                anchors:at least 3 pairs of int, shoul be valid number.
+            
+        '''
         if user_id in [x.get_user_id() for x in self.pool if x is not None]:
             print("already exists")
             return False
@@ -87,7 +103,7 @@ class Source_Pool(threading.Thread):
                 s.set_source_state(self.pipeline.get_source_bin_state(s.get_source_index()))
                 return s
         print("No result for {}".format(uid))
-        return False
+        return "No result"
 
     def get_source_state_by_id(self, uid):
         for s in self.pool:
