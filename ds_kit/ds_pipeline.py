@@ -305,12 +305,14 @@ class Pipeline(object):
         self.msgconv.set_property('config', MSCONV_CONFIG_FILE)
         self.msgconv.set_property('payload-type', schema_type)
         if msg_type == 'kafka':
-            proto_lib = "../../../../lib/libnvds_kafka_proto.so"
-            cfg_file = "..config/cfg_kafka.txt"
+            proto_lib = "/opt/nvidia/deepstream/deepstream-6.0/lib/libnvds_kafka_proto.so"
+            cfg_file = "config/cfg_kafka.txt"
+            conn_str = "localhost;9092;deepstream"
 
         if msg_type == 'mqtt':
             proto_lib = "/opt/teknoir/deepstream-mqtt-sink/libnvds_mqtt_sink_d.so"
             cfg_file = "/opt/teknoir/deepstream-mqtt-sink/cfg.txt"
+            conn_str = "localhost;1883;deepstream"
 
         self.msgbroker.set_property('proto-lib', proto_lib)
         self.msgbroker.set_property('conn-str', conn_str)
