@@ -200,7 +200,7 @@ def tiler_sink_pad_buffer_probe(pad,info, u_data):
                 json_str = json.dumps(lists)
                 # base64array = str(base64.b64encode(json_str.encode('utf-8')),"utf-8")
                 # pickle_str = pickle.dumps(frame_copy)
-                msg_meta = generate_event_msg_meta(msg_meta, json_str)
+                # msg_meta = generate_event_msg_meta(msg_meta, json_str)
                 user_event_meta = pyds.nvds_acquire_user_meta_from_pool(batch_meta)
                 if user_event_meta:
                     user_event_meta.user_meta_data = msg_meta
@@ -225,3 +225,8 @@ def tiler_sink_pad_buffer_probe(pad,info, u_data):
         except StopIteration:
             break
     return Gst.PadProbeReturn.OK
+
+
+
+def msg_sink_pad_block_probe(pad, info, u_data):
+    return Gst.PadProbeReturn.DROP 

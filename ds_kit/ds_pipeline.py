@@ -1,7 +1,4 @@
-import ctypes
 import sys
-
-from numpy import uint
 sys.path.append('../')
 import gi
 import configparser
@@ -14,9 +11,9 @@ import random
 import time
 import threading
 import ctypes
+import os
 
 from common.is_aarch_64 import is_aarch64
-from common.bus_call import bus_call
 
 import pyds
 import utils.file
@@ -32,6 +29,9 @@ MAX_SGIE_NUMBER = 3
 mem_type = int(pyds.NVBUF_MEM_CUDA_UNIFIED)
 MSCONV_CONFIG_FILE = "config/dstest4_msgconv_config.txt"
 schema_type = 0
+
+default_png_path = "/tmp/pipeline.png"
+default_dot_path = "/tmp/pipeline.dot"
 
 
 class Pipeline(object):
@@ -76,6 +76,31 @@ class Pipeline(object):
         self.h264parser = [None] * max_source_num
         self.decoder = [None] * max_source_num
     
+    def bus_call(self, bus, message, loop):
+        t = message.type
+        if t == Gst.MessageType.EOS:
+            sys.stdout.write("End-of-stream\n")
+            loop.quit()
+        elif t==Gst.MessageType.WARNING:
+            err, debug = message.parse_warning()
+            sys.stderr.write("Warning: %s: %s\n" % (err, debug))
+        elif t == Gst.MessageType.ERROR:
+            err, debug = message.parse_error()
+            sys.stderr.write("Error: %s: %s\n" % (err, debug))
+            # loop.quit()
+            loop.quit()
+            loop.run()
+        
+        elif t == Gst.MessageType.ELEMENT:
+            struct = message.get_structure()
+            #Check for stream-eos message
+            if struct is not None and struct.has_name("stream-eos"):
+                parsed, stream_id = struct.get_uint("stream-id")
+                if parsed:
+                    #Set eos status of stream to True, to be deleted in delete-sources
+                    print("Got EOS from stream %d" % stream_id)
+        return True
+
     def _create_pipeline(self):
         GObject.threads_init()
         Gst.init(None)
@@ -304,13 +329,14 @@ class Pipeline(object):
     def set_msg_config(self, msg_type='mqtt', conn_str = "localhost;1883;deepstream"):
         self.msgconv.set_property('config', MSCONV_CONFIG_FILE)
         self.msgconv.set_property('payload-type', schema_type)
+        # self.msgconv.set_property('debug-payload-dir', "/opt/nvidia/deepstream/deepstream-6.0/sources/pythonapps/log/")
         if msg_type == 'kafka':
             proto_lib = "/opt/nvidia/deepstream/deepstream-6.0/lib/libnvds_kafka_proto.so"
             cfg_file = "config/cfg_kafka.txt"
             conn_str = "localhost;9092;deepstream"
 
         if msg_type == 'mqtt':
-            proto_lib = "/opt/teknoir/deepstream-mqtt-sink/libnvds_mqtt_sink_d.so"
+            proto_lib = "/opt/teknoir/deepstream-mqtt-sink/libnvds_mqtt_sink.so"
             cfg_file = "/opt/teknoir/deepstream-mqtt-sink/cfg.txt"
             conn_str = "localhost;1883;deepstream"
 
@@ -320,6 +346,17 @@ class Pipeline(object):
             self.msgbroker.set_property('config', cfg_file)
         
         self.msgbroker.set_property('sync', False)
+
+    def change_msg_config(self, conn_str):
+        return
+
+    def unable_msg_broker(self):
+        self.msg_sink_pad = self.queue_msg.get_static_pad("sink")
+        self.probe = self.msg_sink_pad.add_probe(Gst.PadProbeType.BLOCK, msg_sink_pad_block_probe, 0)
+
+    def enable_msg_broker(self):
+        self.msg_sink_pad.remove_probe(self.probe)
+
 
     def set_ready(self):
         '''
@@ -556,7 +593,7 @@ class Pipeline(object):
         self.loop = GObject.MainLoop()
         self.bus = self.pipeline.get_bus()
         self.bus.add_signal_watch()
-        self.bus.connect ("message", bus_call, self.loop)
+        self.bus.connect ("message", self.bus_call, self.loop)
 
         # Lets add probe to get informed of the meta data generated, we add probe to
         # the sink pad of the osd element, since by that time, the buffer would have
@@ -580,6 +617,7 @@ class Pipeline(object):
         osdsinkpad.add_probe(Gst.PadProbeType.BUFFER, osd_sink_pad_buffer_probe, 0)
         """
         # start play back and listen to events
+        self.graph_pipeline()
         print("Starting pipeline \n")
         
         self.pipeline.set_state(Gst.State.PLAYING)
@@ -592,6 +630,17 @@ class Pipeline(object):
 
     def end_pipeline(self):
         self.pipeline.set_state(Gst.State.NULL)
+
+    def graph_pipeline(self, pngpath=default_png_path, dotpath=default_dot_path):
+        '''
+        export GST_DEBUG_DUMP_DOT_DIR=/tmp/
+        '''
+        Gst.debug_bin_to_dot_file(self.pipeline, Gst.DebugGraphDetails.ALL, "pipeline")
+        try:
+            os.system("dot -Tpng -o {} {}".format(pngpath, dotpath))
+            os.system("dot -T-o {} {}".format(pngpath, dotpath))
+        except Exception:
+            print("error")
 
     def get_source_bin_state(self, index):
         '''
