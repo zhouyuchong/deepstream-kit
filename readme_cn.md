@@ -1,7 +1,7 @@
 # Deepstream Kit
 客制化deepstream接口
 
-## Requirements
+## 环境配置
 + Deepstream 6.0.1+
 + GStreamer 1.14.5
 + Cuda 11.4+
@@ -11,22 +11,23 @@
 
 请按照[官方文档](https://docs.nvidia.com/metropolis/deepstream/dev-guide/text/DS_Quickstart.html#dgpu-setup-for-ubuntu)安装相关依赖。
 
-## Pretrained
-Please refer to the [tensorrtx](https://github.com/wang-xinyu/tensorrtx) for pretrained models and serialized TensorRT engine.
+## 预训练模型
+请按照[tensorrtx](https://github.com/wang-xinyu/tensorrtx)来预训练与序列化你想使用的TensorRT引擎。
 
-Or download from [Google driver](https://drive.google.com/drive/folders/1HTdIhGrKP7JnKY6n8F95mI7SBnx7-4R3?usp=sharing).
+或者从[谷歌网盘](https://drive.google.com/drive/folders/1HTdIhGrKP7JnKY6n8F95mI7SBnx7-4R3?usp=sharing)下载。
 
-Now available:
+现支持的模型:
 + yolov5s
 + retinaface
 + arcface
 
-## Usage
-To run the demo gui.
+## 使用方式
+在运行之前，请确保所有的**路径变量**正确。
+
+运行demo程序.
 ```
 python3 gui.py
 ```
-Make sure all **PATH** are right.
 
 1. Choose the mode: 
    1. OSD: on screen display

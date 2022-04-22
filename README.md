@@ -1,6 +1,8 @@
 # Deepstream Kit
 This repo is a deepstream tool kit contains some interfaces.
 
+[中文](./readme_cn.md)
+
 ## Requirements
 + Deepstream 6.0.1+
 + GStreamer 1.14.5
