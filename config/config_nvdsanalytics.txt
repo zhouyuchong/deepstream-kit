@@ -6,9 +6,9 @@ osd-mode=2
 display-font-size=12
 
 [roi-filtering-stream-0]
-roi-a0=100;100;400;400;700;500
+roi-ROI=500;500;1400;500;1400;900;500;900
 enable=1 
-inverse-roi=1 
+inverse-roi=0 
 class-id=0 
 
 

@@ -1,6 +1,6 @@
 import tkinter as tk
-import ds_pipeline
-import ds_source_pool
+from ds_kit.ds_pipeline import *
+from ds_kit.ds_source_pool import *
 # import piptest
 
 class GUI_window():
@@ -106,19 +106,19 @@ class GUI_window():
         self.root.destroy()
 
     def record_b_callback(self):
-        self.pipeline_thread = ds_pipeline.Pipeline_T(source_number=4, pgie_name='yolov5', sinkt="FAKE")
+        self.pipeline_thread = Pipeline_T(source_number=4, pgie_name='yolov5', sinkt="FAKE")
         self.OutputText.insert(tk.INSERT, "pipeline set to ready \n")
-        self.ds_pool = ds_source_pool.Source_Pool(self.pipeline_thread.get_pipeline(), 4, 1)
+        self.ds_pool = Source_Pool(self.pipeline_thread.get_pipeline(), 4, 1)
         self.ds_pool.start()
         self.RecordB['state'] = 'disabled'
         self.OsdB['state'] = 'disabled'
 
     def osd_b_callback(self):
-        self.pipeline_thread = ds_pipeline.Pipeline_T(source_number=4, pgie_name='yolov5', sinkt="OSD")
+        self.pipeline_thread = Pipeline_T(source_number=4, pgie_name='yolov5', sinkt="OSD")
 
         self.OutputText.insert(tk.INSERT, "pipeline set to ready \n")
 
-        self.ds_pool = ds_source_pool.Source_Pool(self.pipeline_thread.get_pipeline(), 4, 1)
+        self.ds_pool = Source_Pool(self.pipeline_thread.get_pipeline(), 4, 1)
         self.ds_pool.start()
         self.OsdB['state'] = 'disabled'
         self.RecordB['state'] = 'disabled'
