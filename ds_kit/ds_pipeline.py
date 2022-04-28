@@ -593,7 +593,7 @@ class Pipeline(object):
         self.loop = GObject.MainLoop()
         self.bus = self.pipeline.get_bus()
         self.bus.add_signal_watch()
-        self.bus.connect ("message", self.bus_call, self.loop)
+        self.bus.connect ("message", bus_call, self.loop)
 
         # Lets add probe to get informed of the meta data generated, we add probe to
         # the sink pad of the osd element, since by that time, the buffer would have

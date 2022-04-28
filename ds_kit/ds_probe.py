@@ -18,6 +18,7 @@ import json
 from utils.fps import Timer
 from utils.counter import Counter
 from utils.functions import crop_object
+from utils.person import Person_pool, Person_Feature
 from ds_kit.ds_message import *
 # from torch import tensor
 
@@ -32,6 +33,8 @@ SGIE_THRESHOLD = 0.97
 
 
 def analytics_src_pad_buffer_probe(pad,info, u_data):
+    # 初始化一个person pool对象
+    person_pool = Person_pool()
     gst_buffer = info.get_buffer()
     if not gst_buffer:
         print("Unable to get GstBuffer ")
@@ -50,42 +53,8 @@ def analytics_src_pad_buffer_probe(pad,info, u_data):
             frame_meta = pyds.NvDsFrameMeta.cast(l_frame.data)
         except StopIteration:
             break
-
-        l_obj = frame_meta.obj_meta_list
-        while l_obj is not None:
-            try:
-                # Casting l_obj.data to pyds.NvDsObjectMeta
-                obj_meta = pyds.NvDsObjectMeta.cast(l_obj.data)
-            except StopIteration:
-                break
-
-            l_user_meta = obj_meta.obj_user_meta_list
-            while l_user_meta:
-                try:
-                    user_meta = pyds.NvDsUserMeta.cast(l_user_meta.data) #Must cast glist data to NvDsUserMeta object
-                    if user_meta.base_meta.meta_type == pyds.nvds_get_user_meta_type("NVIDIA.DSANALYTICSOBJ.USER_META"):    
-                        #Must cast user metadata to NvDsAnalyticsObjInfo         
-                        user_meta_data = pyds.NvDsAnalyticsObjInfo.cast(user_meta.user_meta_data) 
-                        #Access NvDsAnalyticsObjInfo attributes with user_meta_data.{attribute name}
-                        if user_meta_data.roiStatus and obj_meta.unique_component_id == PGIE_ID: 
-                            if Counter.new_obj(id=obj_meta.object_id):
-                                print("Object {0} roi status: {1}".format(obj_meta.object_id, user_meta_data.roiStatus))
-                                # n_frame = pyds.get_nvds_buf_surface(hash(gst_buffer), frame_meta.batch_id)
-                                # if n_frame is not None:
-                                    # print("get surface")
-                except StopIteration:
-                    break
-
-                try:
-                    l_user_meta = l_user_meta.next
-                except StopIteration:
-                    break
-            # if (obj_meta.unique_component_id == PGIE_ID) and (obj_meta.class_id == PGIE_CLASS_ID_PERSON) and ():
-
-            try:
-                l_obj = l_obj.next
-            except StopIteration:
-                break
+        frame_num = frame_meta.frame_num
+        source_id = frame_meta.source_id
         l_obj = frame_meta.obj_meta_list
         while l_obj is not None:
             try:
@@ -94,19 +63,68 @@ def analytics_src_pad_buffer_probe(pad,info, u_data):
             except StopIteration:
                 break
             
-            if obj_meta.parent is not None:
-                # print(obj_meta.object_id, obj_meta.parent.object_id)
-                if (obj_meta.unique_component_id == SGIE_ID) and (obj_meta.parent.unique_component_id == PGIE_ID) \
-                    and (Counter.new_obj(obj_meta.parent.object_id) == False) and (obj_meta.confidence > SGIE_THRESHOLD)\
-                    and (Counter.new_face(obj_meta.object_id)):
-                    print("There is a new face {0} of person {1} be detected in ROI".format(obj_meta.object_id, obj_meta.parent.object_id))
-                    print("detected people:", Counter.get_all_person())
-                    print("detected faces:", Counter.get_all_face())
+            # 如果满足：yolo检测对象 & 类别为人 & tracker-id第一次在场景中出现，则设置发送信号为真
+            if (obj_meta.unique_component_id==PGIE_ID) and (obj_meta.class_id==PGIE_CLASS_ID_PERSON) and \
+                (person_pool.id_exist(obj_meta.object_id)==False):
+                # 初始化一个person feature对象
+                person = Person_Feature()
+                person.set_frame_id(frame_num)
+                person.set_source_id(source_id)
+                person.set_person_id_coor([obj_meta.object_id, obj_meta.rect_params.top, obj_meta.rect_params.left, \
+                    obj_meta.rect_params.width, obj_meta.rect_params.height])
+                person.set_msg_flag(flag=True)
+                # 将新检测到的人员添加到池中
+                person_pool.add(person)
 
             try:
                 l_obj = l_obj.next
             except StopIteration:
-                break 
+                break
+
+        # 第一次循环后，帧中所有的人员应该都在池中了，此时判断人员的其他信息
+        l_obj = frame_meta.obj_meta_list
+        while l_obj is not None:
+            try:
+                obj_meta = pyds.NvDsObjectMeta.cast(l_obj.data)
+            except StopIteration:
+                break
+
+            if (obj_meta.unique_component_id==SGIE_ID) and (obj_meta.parent.unique_component_id == PGIE_ID) \
+                    and (obj_meta.confidence > SGIE_THRESHOLD):
+                # 此时所有的人应该都在池中了
+                temp_person = person_pool.get_person_by_id(obj_meta.parent.object_id)
+                if(temp_person.check_face_finished()==False):
+                    print("new face deteced:", obj_meta.object_id, " of ", obj_meta.parent.object_id)
+                    temp_person.set_face_id_coor([obj_meta.object_id, obj_meta.rect_params.top, obj_meta.rect_params.left, obj_meta.rect_params.width, obj_meta.rect_params.height])
+                    temp_person.set_msg_flag(True)
+
+            person = person_pool.get_person_by_id(obj_meta.object_id)
+            l_user_meta = obj_meta.obj_user_meta_list
+            while l_user_meta:
+                try:
+                    user_meta = pyds.NvDsUserMeta.cast(l_user_meta.data) #Must cast glist data to NvDsUserMeta object
+                    if user_meta.base_meta.meta_type == pyds.nvds_get_user_meta_type("NVIDIA.DSANALYTICSOBJ.USER_META"):    
+                        #Must cast user metadata to NvDsAnalyticsObjInfo         
+                        user_meta_data = pyds.NvDsAnalyticsObjInfo.cast(user_meta.user_meta_data) 
+                        #Access NvDsAnalyticsObjInfo attributes with user_meta_data.{attribute name}
+                        # 如果roi中出现了人员，进行判断roi信息是否有变化
+                        if (obj_meta.unique_component_id == PGIE_ID):
+                            if person.check_roi(user_meta_data.roiStatus):
+                                person.set_roi(roi=user_meta_data.roiStatus)
+                                person.set_msg_flag(flag=True)
+                
+                except StopIteration:
+                    break
+
+                try:
+                    l_user_meta = l_user_meta.next
+                except StopIteration:
+                    break
+            try:
+                l_obj = l_obj.next
+            except StopIteration:
+                break
+        
         Timer.get_stream_fps(index=frame_meta.pad_index).get_fps()
         # fps_streams["stream{0}".format(frame_meta.pad_index)].get_fps()
         try:
@@ -126,6 +144,8 @@ def tiler_sink_pad_buffer_probe(pad,info, u_data):
 
     l_frame = batch_meta.frame_meta_list
     while l_frame is not None:
+        counter = Counter()
+        counter.is_full()
         try:
             # Note that l_frame.data needs a cast to pyds.NvDsFrameMeta
             # The casting is done by pyds.glist_get_nvds_frame_meta()
@@ -144,7 +164,8 @@ def tiler_sink_pad_buffer_probe(pad,info, u_data):
                 obj_meta = pyds.NvDsObjectMeta.cast(l_obj.data)
             except StopIteration:
                 break
-
+            
+            
             if (obj_meta.unique_component_id ==SGIE_ID) and (Counter.is_face_finished(obj_meta.object_id) == True) \
                 and (Counter.new_face(obj_meta.object_id) == False):
                 # print(obj_meta.object_id)
