@@ -1,11 +1,16 @@
 import threading
 
+
 people = []
 count = 0
+MAX_NUMBER_PERSON = 40
 
-class Person_Feature():
+class Person_Feature(threading.Thread):
     def __init__(self):
-        
+        threading.Thread.__init__(self)
+        self._lock = threading.Lock()
+        self._timeout = 30
+
         self.person_id_coor = []
         self.face_id_coor = []
         self.frame = 0
@@ -19,7 +24,8 @@ class Person_Feature():
         self.background_image = None
         self.body_image = None
         self.face_image = None
-        self.flag = False
+        self.msg_flag = False
+        self.save_flag = False
         # self.change
 
     def set_person_id_coor(self, id_coor):
@@ -65,11 +71,11 @@ class Person_Feature():
         self.face_image = array
 
     def set_msg_flag(self, flag):
-        self.flag = flag
-#################################################################
-    def print_info(self):
-        print(self.__dict__)
+        self.msg_flag = flag
 
+    def set_save_flag(self, flag):
+        self.save_flag = flag
+#################################################################
     def get_person_id(self):
         return self.person_id_coor[0]
 
@@ -90,7 +96,15 @@ class Person_Feature():
 
     def get_face_coor(self):
         return self.face_id_coor[1:]
-    
+
+    def get_msg_flag(self):
+        return self.msg_flag
+
+    def get_save_flag(self):
+        return self.save_flag
+
+    def get_roi(self):
+        return self.roi
 
 
 
@@ -106,6 +120,16 @@ class Person_Feature():
             return False
         else:
             return True
+
+    def save_to_local(self):
+        if not self._lock.acquire(timeout=self._timeout):
+            print("Fail to acquire lock, maybe busy")
+            return False
+
+        self._lock.release()
+
+    def print_info(self):
+        print(self.__dict__)
 
 class Person_pool(threading.Thread):
     def __init__(self):
@@ -132,7 +156,8 @@ class Person_pool(threading.Thread):
             if per.get_person_id() == id:
                 return per
 
-class person_thread(threading.Thread):
+
+class Person_thread(threading.Thread):
     def __init__(self):
         threading.Thread.__init__(self)
         self.daemon = True
@@ -146,14 +171,15 @@ class person_thread(threading.Thread):
             return False
         if self.count != len(people):
             self.count = len(people)
-            for per in people:
-                per.print_info()
+            #for per in people:
+                # per.print_info()
+            print("person pool number:", self.count)
             print("###################################################################################")
 
         self._lock.release()
 
     def check_full(self):
-        if self.count >= 20:
+        if self.count >= MAX_NUMBER_PERSON:
             if not self._lock.acquire(timeout=self._timeout):
                 print("Fail to acquire lock, maybe busy")
                 return False
