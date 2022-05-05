@@ -3,7 +3,7 @@ import sys
 from ds_kit.ds_pipeline import *
 from ds_kit.ds_source_pool import *
 from ds_kit.ds_controller import *
-from utils.person import person_thread
+from utils.person import Person_thread
 # import piptest
 
 class GUI_window():
@@ -97,8 +97,10 @@ class GUI_window():
         # self.name_input.delete(1.0, tk.END)'''
 
         a1 = {'area':'0;0;1400;0;1400;900;0;900'}
-        signale = self.ds_pool.add_source_to_pool('rtsp://admin:sh123456@192.168.1.237:554/h264/ch1/main/av_stream', 1, 30, '001', \
-            1, 0, 0, **a1)
+        signale = self.ds_pool.add_source_to_pool('rtsp://admin:sh123456@192.168.1.235:554/h264/ch1/main/av_stream', 1, 20, '001', 1, 0, 0, **a1)
+        self.ds_pool.add_source_to_pool('rtsp://admin:sh242@192.168.1.239:554/h264/ch1/main/av_stream', 2, 20, '002', 1, 0, 0, **a1)
+        self.ds_pool.add_source_to_pool('rtsp://admin:sh123456@192.168.1.233:554/h264/ch1/main/av_stream', 3, 20, '003', 1, 0, 0, **a1)
+        self.ds_pool.add_source_to_pool('rtsp://admin:sh123456@192.168.1.234:554/h264/ch1/main/av_stream', 4, 20, '004', 1, 0, 0, **a1)
 
     def delete_b_callback(self):
         self.d_uid = self.delete_input.get(1.0, "end-1c")
@@ -123,7 +125,7 @@ class GUI_window():
     def record_b_callback(self):
         self.pipeline_thread = Pipeline_T(source_number=4, pgie_name='yolov5', sgie_name=['retinaface', 'arcface'], sinkt="FAKE")
         self.controller = Pipeline_Controller(pipeline=self.pipeline_thread.get_pipeline())
-        self.person_thread = person_thread()
+        self.person_thread = Person_thread()
         self.OutputText.insert(tk.INSERT, "pipeline set to ready \n")
         self.ds_pool = Source_Pool(self.pipeline_thread.get_pipeline(), 4, 1)
         self.ds_pool.start()
@@ -132,7 +134,7 @@ class GUI_window():
 
     def osd_b_callback(self):
         self.pipeline_thread = Pipeline_T(source_number=4, pgie_name='yolov5', sgie_name=['retinaface', 'arcface'], sinkt="OSD")
-        self.person_thread = person_thread()
+        self.person_thread = Person_thread()
 
         self.OutputText.insert(tk.INSERT, "pipeline set to ready \n")
 

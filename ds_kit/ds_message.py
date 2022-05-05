@@ -93,13 +93,13 @@ def meta_free_func(data, user_data):
         pyds.free_gbuffer(srcmeta.extMsg)
         srcmeta.extMsgSize = 0
 
-def generate_person_meta(data, array):
+def generate_person_meta(data, list):
     obj = pyds.NvDsPersonObject.cast(data)
     # obj.age = 24
     # obj.cap = json.dumps([1.0,2.0, 3.0,4.0])
     # print("before:", obj.cap, type(obj.cap))
-    obj.faceimage = array
-    obj.feature = ""
+    obj.faceimage = ""
+    obj.feature = " ".join(list)
     # print("after:", obj.cap, type(obj.cap))
     # obj.hair = "hair"
     # obj.gender = "male"

@@ -16,7 +16,7 @@ def init_analytics_config_file(max_source_number):
     text_line = []
     text_line.append("[property]\nenable=1\nconfig-width=1920\nconfig-height=1080\nosd-mode=2\ndisplay-font-size=12\n\n")
     file = open(path,'w')
-    for i in range(max_source_number):
+    for i in range(max_source_number+1):
         text_line.append("[roi-filtering-stream-{0}]\nroi-{1}=0;0;0;0;0;0\nenable=0\ninverse-roi=0 \nclass-id=-1 \n\n".format(i, i))
     file.writelines(text_line)
     file.close()
@@ -38,7 +38,7 @@ def modify_analytics_config_file(max_source_number, index, enable, inverse_roi=1
             l = line_number
             break
 
-    if index == max_source_number-1:
+    if index == max_source_number:
         del text_lines[l+1:]
     else:
         comp_str_2 = "\[roi-filtering-stream-{0}\]".format(index+1)

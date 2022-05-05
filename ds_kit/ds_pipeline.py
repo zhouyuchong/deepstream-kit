@@ -12,6 +12,8 @@ import time
 import threading
 import ctypes
 import os
+import faulthandler
+faulthandler.enable()
 
 from common.is_aarch_64 import is_aarch64
 
@@ -34,7 +36,7 @@ default_png_path = "/tmp/pipeline.png"
 default_dot_path = "/tmp/pipeline.dot"
 
 
-class Pipeline(object):
+class Pipeline(threading.Thread):
     ''' 
     This class contains basic operation of gst-pipeline including init/create, start/end, add/delete resource, 
     Details:
@@ -49,6 +51,9 @@ class Pipeline(object):
             sgie_index: index of sgie list.
             source_bin_list: a list of source bins.
         '''
+        threading.Thread.__init__(self)
+        self._lock = threading.Lock()
+        self._timeout = 30
         self._create_pipeline()
         self.max_source_number = max_source_num
         if sink_type == "OSD":
@@ -302,6 +307,11 @@ class Pipeline(object):
         self.msgbroker = Gst.ElementFactory.make("nvmsgbroker", "nvmsg-broker")
         if not self.msgbroker:
             sys.stderr.write(" Unable to create msgbroker \n")
+
+
+        self.queue_osd = Gst.ElementFactory.make("queue", "queue_osd")
+        if not self.queue_osd:
+            sys.stderr.write(" Unable to create queue-osd \n")
         
         tiler_rows=int(math.sqrt(self.max_source_number))
         tiler_columns=int(math.ceil((1.0*self.max_source_number)/tiler_rows))
@@ -325,6 +335,8 @@ class Pipeline(object):
         self.pipeline.add(self.sink)
         self.pipeline.add(self.msgconv)
         self.pipeline.add(self.msgbroker)
+
+        self.pipeline.add(self.queue_osd)
         
     def set_msg_config(self, msg_type='mqtt', conn_str = "localhost;1883;deepstream"):
         self.msgconv.set_property('config', MSCONV_CONFIG_FILE)
@@ -380,9 +392,11 @@ class Pipeline(object):
         self.nvanalytics.link(self.queue_analytics)
         self.queue_analytics.link(self.nvvidconv1)
         self.nvvidconv1.link(self.filter1)
-        self.filter1.link(self.tiler)
-        self.tiler.link(self.nvvideoconvert)
-        self.nvvideoconvert.link(self.nvosd)
+        # self.filter1.link(self.tiler)
+        # self.tiler.link(self.nvvideoconvert)
+        self.filter1.link(self.nvvideoconvert)
+        self.nvvideoconvert.link(self.queue_osd)
+        self.queue_osd.link(self.nvosd)
         self.nvosd.link(self.tee)
         self.queue_msg.link(self.msgconv)
         self.msgconv.link(self.msgbroker)
@@ -503,7 +517,7 @@ class Pipeline(object):
         # Because rtspsrc only has 'sometimes' pad
         # Thus connect to the "pad-added" signal of the rtspsrc which generates a
         # callback once a new pad for raw data has been created by the rtspsrc
-        bin.connect("pad-added",self._combine_newpad,self.source_index_list[index])
+        bin.connect("pad-added",self._cb_newpad,self.source_index_list[index])
 
         return bin
 
@@ -561,8 +575,11 @@ class Pipeline(object):
             print("STATE CHANGE ASYNC\n")
             self.pipeline.remove(self.source_bin_list[index])
 
-    def _combine_newpad(self, rtspsrc, pad, data):
-        print("In combine_newpad\n")
+    def _cb_newpad(self, rtspsrc, pad, data):
+        if not self._lock.acquire(timeout=self._timeout):
+            print("Fail to acquire lock, maybe busy")
+            return False
+        print("In cb_newpad\n")
         caps=pad.get_current_caps()
         gststruct=caps.get_structure(0)
         gstname=gststruct.get_name()
@@ -587,6 +604,7 @@ class Pipeline(object):
             print("videorate linked to streammux")
         else:
             sys.stderr.write("Failed to link videorate to streammux\n")
+        self._lock.release()
 
     def start_pipeline(self):
         Timer(self.max_source_number)

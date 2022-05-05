@@ -13,6 +13,7 @@ import pyds
 import numpy as np
 import base64
 import json
+import time
 
 
 from utils.fps import Timer
@@ -53,6 +54,7 @@ def analytics_src_pad_buffer_probe(pad,info, u_data):
             frame_meta = pyds.NvDsFrameMeta.cast(l_frame.data)
         except StopIteration:
             break
+        # get frame number and souce id
         frame_num = frame_meta.frame_num
         source_id = frame_meta.source_id
         l_obj = frame_meta.obj_meta_list
@@ -68,12 +70,15 @@ def analytics_src_pad_buffer_probe(pad,info, u_data):
                 (person_pool.id_exist(obj_meta.object_id)==False):
                 # 初始化一个person feature对象
                 person = Person_Feature()
+                ts = time.strftime("%Y%m%d%H:%M:%S", time.localtime())
                 person.set_frame_id(frame_num)
                 person.set_source_id(source_id)
+                person.set_timestamp(ts)
                 person.set_person_id_coor([obj_meta.object_id, obj_meta.rect_params.top, obj_meta.rect_params.left, \
                     obj_meta.rect_params.width, obj_meta.rect_params.height])
                 # should set send-message flag to true
                 person.set_msg_flag(flag=True)
+                person.set_save_body_flag(True)
                 # person.set_save_flag(flag=True)
                 # 将新检测到的人员添加到池中
                 person_pool.add(person)
@@ -98,6 +103,7 @@ def analytics_src_pad_buffer_probe(pad,info, u_data):
                 if(temp_person.check_face_finished()==False):
                     print("new face deteced:", obj_meta.object_id, " of ", obj_meta.parent.object_id)
                     temp_person.set_face_id_coor([obj_meta.object_id, obj_meta.rect_params.top, obj_meta.rect_params.left, obj_meta.rect_params.width, obj_meta.rect_params.height])
+                    temp_person.set_save_face_flag(True)
                     l_user_meta = obj_meta.obj_user_meta_list
                     while l_user_meta:
                         try:
@@ -118,6 +124,7 @@ def analytics_src_pad_buffer_probe(pad,info, u_data):
                             norm=np.linalg.norm(res)                    
                             normal_array = res / norm
                             temp_person.set_face_feature(normal_array)
+                            temp_person.set_save_face_feature_flag(True)
                             # print(obj_meta.object_id, "  ", obj_meta.parent.object_id)
                             # break
 
@@ -190,6 +197,7 @@ def tiler_sink_pad_buffer_probe(pad,info, u_data):
 
         l_obj = frame_meta.obj_meta_list
         frame_number=frame_meta.frame_num
+        source_id = frame_meta.source_id
         while l_obj is not None:
             try:
                 # Casting l_obj.data to pyds.NvDsObjectMeta
@@ -199,12 +207,15 @@ def tiler_sink_pad_buffer_probe(pad,info, u_data):
             
             if person_pool.id_exist(obj_meta.object_id):
                 person = person_pool.get_person_by_id(obj_meta.object_id)
-                if person.get_back_image() is not None:
+                if person.get_back_image() is None and person.get_frame_id()==frame_number and person.get_source_id()==source_id:
                     n_frame = pyds.get_nvds_buf_surface(hash(gst_buffer), frame_meta.batch_id)
                     # lists = frame_copy.tolist()
                     # json_str = json.dumps(lists)
                     # base64array = str(base64.b64encode(json_str.encode('utf-8')),"utf-8")
                     person.set_back_image(n_frame)
+                    if person.get_save_bg_flag() is None:
+                        person.set_save_bg_flag(True)
+
                 if person.get_msg_flag() == True:
                     msg_meta = pyds.alloc_nvds_event_msg_meta()
                     msg_meta.bbox.top = obj_meta.rect_params.top
