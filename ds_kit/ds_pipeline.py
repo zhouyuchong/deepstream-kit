@@ -579,7 +579,8 @@ class Pipeline(threading.Thread):
         if not self._lock.acquire(timeout=self._timeout):
             print("Fail to acquire lock, maybe busy")
             return False
-        print("In cb_newpad\n")
+        print("\nIn cb_newpad")
+        print(self.source_index_list)
         caps=pad.get_current_caps()
         gststruct=caps.get_structure(0)
         gstname=gststruct.get_name()
@@ -616,7 +617,7 @@ class Pipeline(threading.Thread):
         # Lets add probe to get informed of the meta data generated, we add probe to
         # the sink pad of the osd element, since by that time, the buffer would have
         # had got all the metadata.
-        analytics_src_pad = self.queue_analytics.get_static_pad("sink")
+        '''analytics_src_pad = self.queue_analytics.get_static_pad("sink")
         if not analytics_src_pad:
             sys.stderr.write(" Unable to get sink pad \n")
         else:
@@ -626,7 +627,7 @@ class Pipeline(threading.Thread):
         if not tiler_sink_pad:
             sys.stderr.write(" Unable to get sink pad \n")
         else:
-            tiler_sink_pad.add_probe(Gst.PadProbeType.BUFFER, tiler_sink_pad_buffer_probe, 0)
+            tiler_sink_pad.add_probe(Gst.PadProbeType.BUFFER, tiler_sink_pad_buffer_probe, 0)'''
         """
         osdsinkpad = nvosd.get_static_pad("sink")
         if not osdsinkpad:
@@ -635,7 +636,7 @@ class Pipeline(threading.Thread):
         osdsinkpad.add_probe(Gst.PadProbeType.BUFFER, osd_sink_pad_buffer_probe, 0)
         """
         # start play back and listen to events
-        self.graph_pipeline()
+        # self.graph_pipeline()
         print("Starting pipeline \n")
         
         self.pipeline.set_state(Gst.State.PLAYING)

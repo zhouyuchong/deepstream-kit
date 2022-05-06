@@ -17,7 +17,6 @@ import time
 
 
 from utils.fps import Timer
-from utils.counter import Counter
 from utils.functions import crop_object
 from utils.person import Person_pool, Person_Feature
 from ds_kit.ds_message import *
@@ -65,12 +64,14 @@ def analytics_src_pad_buffer_probe(pad,info, u_data):
             except StopIteration:
                 break
             
-            # 如果满足：yolo检测对象 & 类别为人 & tracker-id第一次在场景中出现
-            if (obj_meta.unique_component_id==PGIE_ID) and (obj_meta.class_id==PGIE_CLASS_ID_PERSON) and \
-                (person_pool.id_exist(obj_meta.object_id)==False):
+            # 如果满足：为yolo检测对象 & 类别为人 & 宽度大于100 & 高度大于300 & tracker-id第一次在场景中出现
+            if (obj_meta.unique_component_id==PGIE_ID) and (obj_meta.class_id==PGIE_CLASS_ID_PERSON) and (obj_meta.rect_params.width >= 100) \
+                and (obj_meta.rect_params.height >= 300) and (person_pool.id_exist(obj_meta.object_id)==False):
                 # 初始化一个person feature对象
                 person = Person_Feature()
+                # 生成当前时间戳
                 ts = time.strftime("%Y%m%d%H:%M:%S", time.localtime())
+                # 设置属性
                 person.set_frame_id(frame_num)
                 person.set_source_id(source_id)
                 person.set_timestamp(ts)
@@ -95,15 +96,19 @@ def analytics_src_pad_buffer_probe(pad,info, u_data):
                 obj_meta = pyds.NvDsObjectMeta.cast(l_obj.data)
             except StopIteration:
                 break
-
+            
+            # 如果该检测物为retinaface推理结果 & 父辈为yolo & 宽度大于64 & 高度大于64 & 置信度大于阈值
             if (obj_meta.unique_component_id==SGIE_ID) and (obj_meta.parent.unique_component_id == PGIE_ID) \
+                    and (obj_meta.rect_params.width >= 50) and (obj_meta.rect_params.height >= 50) \
                     and (obj_meta.confidence > SGIE_THRESHOLD):
-                # 此时所有的人应该都在池中了
+                
+                # 因为有脸一定是添加过的人了，所以这里不判断id_exist应该也可行
                 temp_person = person_pool.get_person_by_id(obj_meta.parent.object_id)
+                # 检查该人员是否已经有脸
                 if(temp_person.check_face_finished()==False):
-                    print("new face deteced:", obj_meta.object_id, " of ", obj_meta.parent.object_id)
                     temp_person.set_face_id_coor([obj_meta.object_id, obj_meta.rect_params.top, obj_meta.rect_params.left, obj_meta.rect_params.width, obj_meta.rect_params.height])
                     temp_person.set_save_face_flag(True)
+                    # 获取该脸的arcface推理结果
                     l_user_meta = obj_meta.obj_user_meta_list
                     while l_user_meta:
                         try:
@@ -125,7 +130,6 @@ def analytics_src_pad_buffer_probe(pad,info, u_data):
                             normal_array = res / norm
                             temp_person.set_face_feature(normal_array)
                             temp_person.set_save_face_feature_flag(True)
-                            # print(obj_meta.object_id, "  ", obj_meta.parent.object_id)
                             # break
 
                         try:
@@ -135,35 +139,39 @@ def analytics_src_pad_buffer_probe(pad,info, u_data):
                     # because there is a new face being detected, should set the send-message flag to true
                     temp_person.set_msg_flag(True)
 
-            person = person_pool.get_person_by_id(obj_meta.object_id)
-            l_user_meta = obj_meta.obj_user_meta_list
-            while l_user_meta:
-                try:
-                    user_meta = pyds.NvDsUserMeta.cast(l_user_meta.data) #Must cast glist data to NvDsUserMeta object
-                except StopIteration:
-                    break
-                if user_meta.base_meta.meta_type == pyds.nvds_get_user_meta_type("NVIDIA.DSANALYTICSOBJ.USER_META"):    
-                    #Must cast user metadata to NvDsAnalyticsObjInfo         
-                    user_meta_data = pyds.NvDsAnalyticsObjInfo.cast(user_meta.user_meta_data) 
-                    #Access NvDsAnalyticsObjInfo attributes with user_meta_data.{attribute name}
-                    # 如果roi中出现了人员，进行判断roi信息是否有变化
-                    if (obj_meta.unique_component_id == PGIE_ID):
-                        if person.check_roi(user_meta_data.roiStatus):
-                            person.set_roi(roi=user_meta_data.roiStatus)
-                            # print(user_meta_data.roiStatus)
-                            # because there is a roi-state change, should be reported
-                            person.set_msg_flag(flag=True)
-                
+            # 获取当前object的ROI信息
+            # 尝试获取对应id的person对象
+            if person_pool.id_exist(obj_meta.object_id):
+                person = person_pool.get_person_by_id(obj_meta.object_id)
+                l_user_meta = obj_meta.obj_user_meta_list
+                while l_user_meta:
+                    try:
+                        user_meta = pyds.NvDsUserMeta.cast(l_user_meta.data) #Must cast glist data to NvDsUserMeta object
+                    except StopIteration:
+                        break
+                    if user_meta.base_meta.meta_type == pyds.nvds_get_user_meta_type("NVIDIA.DSANALYTICSOBJ.USER_META"):    
+                        #Must cast user metadata to NvDsAnalyticsObjInfo         
+                        user_meta_data = pyds.NvDsAnalyticsObjInfo.cast(user_meta.user_meta_data) 
+                        #Access NvDsAnalyticsObjInfo attributes with user_meta_data.{attribute name}
+                        # 如果roi中出现了人员，进行判断roi信息是否有变化
+                        if (obj_meta.unique_component_id == PGIE_ID):
+                            if person.check_roi(user_meta_data.roiStatus):
+                                person.set_roi(roi=user_meta_data.roiStatus)
+                                # print(user_meta_data.roiStatus)
+                                # because there is a roi-state change, should be reported
+                                person.set_msg_flag(flag=True)
+                    
 
-                try:
-                    l_user_meta = l_user_meta.next
-                except StopIteration:
-                    break
+                    try:
+                        l_user_meta = l_user_meta.next
+                    except StopIteration:
+                        break
             try:
                 l_obj = l_obj.next
             except StopIteration:
                 break
         
+        # 打印fps
         Timer.get_stream_fps(index=frame_meta.pad_index).get_fps()
         try:
             l_frame=l_frame.next
@@ -178,13 +186,10 @@ def tiler_sink_pad_buffer_probe(pad,info, u_data):
     if not gst_buffer:
         print("Unable to get GstBuffer ")
         return
-
+    
     batch_meta = pyds.gst_buffer_get_nvds_batch_meta(hash(gst_buffer))
-
     l_frame = batch_meta.frame_meta_list
     while l_frame is not None:
-        counter = Counter()
-        counter.is_full()
         try:
             # Note that l_frame.data needs a cast to pyds.NvDsFrameMeta
             # The casting is done by pyds.glist_get_nvds_frame_meta()
@@ -207,8 +212,9 @@ def tiler_sink_pad_buffer_probe(pad,info, u_data):
             
             if person_pool.id_exist(obj_meta.object_id):
                 person = person_pool.get_person_by_id(obj_meta.object_id)
-                if person.get_back_image() is None and person.get_frame_id()==frame_number and person.get_source_id()==source_id:
+                if (person.get_back_image() is None) and (person.get_frame_id()==frame_number) and (person.get_source_id()==source_id):
                     n_frame = pyds.get_nvds_buf_surface(hash(gst_buffer), frame_meta.batch_id)
+
                     # lists = frame_copy.tolist()
                     # json_str = json.dumps(lists)
                     # base64array = str(base64.b64encode(json_str.encode('utf-8')),"utf-8")
@@ -239,6 +245,7 @@ def tiler_sink_pad_buffer_probe(pad,info, u_data):
                                                         user_event_meta)
                     else:
                         print("Error in attaching event meta to buffer\n")
+                # 发送过后要记得设置发送信号为假
                 person.set_msg_flag(False)
             try:
                 l_obj = l_obj.next

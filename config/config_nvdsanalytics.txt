@@ -6,26 +6,35 @@ osd-mode=2
 display-font-size=12
 
 [roi-filtering-stream-0]
-roi-ROI=500;500;1400;500;1400;900;500;900
+roi-area=0;0;1400;0;1400;900;0;900
 enable=1 
 inverse-roi=0 
 class-id=0 
 
 
 [roi-filtering-stream-1]
-roi-1=0;0;0;0;0;0
-enable=0
+roi-area=0;0;1400;0;1400;900;0;900
+enable=1 
 inverse-roi=0 
-class-id=-1 
+class-id=0 
+
 
 [roi-filtering-stream-2]
-roi-2=0;0;0;0;0;0
-enable=0
+roi-area=0;0;1400;0;1400;900;0;900
+enable=1 
 inverse-roi=0 
-class-id=-1 
+class-id=0 
+
 
 [roi-filtering-stream-3]
-roi-3=0;0;0;0;0;0
+roi-area=0;0;1400;0;1400;900;0;900
+enable=1 
+inverse-roi=0 
+class-id=0 
+
+
+[roi-filtering-stream-4]
+roi-4=0;0;0;0;0;0
 enable=0
 inverse-roi=0 
 class-id=-1 
